@@ -126,7 +126,7 @@ fun Onboarding(vm: HomeViewModel, buckets: WheelBuckets) {
                     }
                     else -> {
                         Title("The parking lot")
-                        Body("Optional. With Kite as the assistant, one gesture in any app saves the screen and a way back to it. Sharing to Kite works without this.")
+                        Body("Optional. Switch on the park shortcut, then press both volume keys together in any app to save the screen and a way back to it. Sharing to Kite works without this.")
                         Spacer(Modifier.height(16.dp))
                         SetupRows(vm, SetupGroup.PARKING)
                     }

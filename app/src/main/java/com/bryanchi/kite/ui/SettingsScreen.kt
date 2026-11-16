@@ -146,7 +146,7 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
         Section("How Kite works")
         Help("Letter wheel", "Press anywhere on home and slide. Slide along the letters, then across onto an app and let go. The app you use most is straight across from its letter. Let go on a letter to see all its apps. Slide back toward the edge of the screen to cancel.")
         Help("Pinned apps", "Your pinned apps sit in the thumb zone and never move. One \"now\" slot under them changes with the time of day.")
-        Help("Parking lot", "Use the assistant gesture in any app, or Share › Park in Kite. Tap a card to jump back to that exact page when the app supports it. Cards disappear after 24 hours unless you keep them.")
+        Help("Parking lot", "Press both volume keys together in any app, tap the Park tile, or use Share › Park in Kite. Tap a card to jump back to that exact page when the app supports it. Cards disappear after 24 hours unless you keep them.")
         Help("Social timer", "Each open from Kite has a pause that grows (5 s, 10 s, 20 s, 30 s). When your budget runs out, or during blackout, the app is covered. The only way through is waiting on the block screen, and each wait doubles.")
         Spacer(Modifier.height(40.dp))
     }
@@ -195,12 +195,23 @@ fun SetupRows(vm: HomeViewModel, group: SetupGroup) {
                 extra = autostartExtra,
             ) { Perms.openVivoAutostart(context) }
         }
-        SetupGroup.PARKING -> SetupRow(
-            "Digital assistant: Kite",
-            "Then long-press home (or swipe up from a bottom corner) in any app to park what's on screen. " +
-                "On vivo: Settings › Apps › Default apps › Digital assistant app. Turn on \"Use screenshot\" too.",
-            p.assistant,
-        ) { Perms.openAssistant(context) }
+        SetupGroup.PARKING -> {
+            SetupRow(
+                "Park shortcut",
+                "Lets you park any screen without Kite being the assistant. In the list, open \"Kite park shortcut\" " +
+                    "(it may be under Downloaded or Installed apps) and switch it on. " +
+                    "If it's greyed out: Settings › Apps › Kite › ⋮ › Allow restricted settings, then try again.",
+                p.capture,
+            ) { Perms.openAccessibility(context) }
+            Text(
+                "Then park with any of these:\n" +
+                    "• Press volume up and volume down at the same time\n" +
+                    "• The \"Park\" tile in Quick Settings (add it by editing the tiles)\n" +
+                    "• \"Park this screen\" as a shortcut, e.g. in vivo's quick-launch gesture settings\n" +
+                    "• Share › Park in Kite, which works without any setup",
+                color = Dim, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 22.dp, bottom = 6.dp),
+            )
+        }
     }
 }
 

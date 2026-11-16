@@ -49,7 +49,46 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- "Park this screen" app shortcut: no window, just parks what's underneath -->
+        <activity
+            android:name=".capture.CaptureShortcutActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="com.bryanchi.kite.capture"
+            android:label="@string/capture_shortcut_label"
+            android:theme="@style/Theme.Kite.Invisible" />
+
+        <!-- Park from anywhere: volume up + down together, accessibility button -->
+        <service
+            android:name=".capture.CaptureService"
+            android:exported="true"
+            android:label="@string/capture_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/capture_service" />
+        </service>
+
+        <!-- Park from the Quick Settings shade -->
+        <service
+            android:name=".capture.CaptureTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_kite"
+            android:label="@string/capture_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- Pause / block screen for social apps -->
         <activity

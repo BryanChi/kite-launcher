@@ -62,6 +62,8 @@ object Perms {
         Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS),
         Intent(Settings.ACTION_SETTINGS),
     )
+    fun openAccessibility(c: Context) = start(c, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+
     fun openAppDetails(c: Context, pkg: String = c.packageName) =
         start(c, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null)))
 

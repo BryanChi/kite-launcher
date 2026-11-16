@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.bryanchi.kite.capture.CaptureService
 import com.bryanchi.kite.data.AppEntry
 import com.bryanchi.kite.data.Card
 import com.bryanchi.kite.data.Perms
@@ -33,6 +34,7 @@ data class PermState(
     val battery: Boolean = false,
     val autostart: Boolean = false,
     val assistant: Boolean = false,
+    val capture: Boolean = false,
     val secure: Boolean = false,
 ) {
     val timerReady get() = usage && overlay && battery && autostart
@@ -98,6 +100,7 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             battery = Perms.ignoresBattery(ctx),
             autostart = Kite.prefs.autostartConfirmed,
             assistant = Perms.isAssistant(ctx),
+            capture = CaptureService.isEnabled(ctx),
             secure = Perms.canWriteSecure(ctx),
         )
         // Home is never a social app: make sure the screen is back in colour.
