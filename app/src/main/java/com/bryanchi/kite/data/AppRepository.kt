@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.LauncherApps
+import android.graphics.Rect
+import android.os.Bundle
 import android.os.UserHandle
 import android.os.UserManager
 import androidx.compose.ui.graphics.ImageBitmap
@@ -103,8 +105,9 @@ class AppRepository(private val context: Context) {
 
     fun find(pkg: String): AppEntry? = _apps.value.firstOrNull { it.pkg == pkg }
 
-    fun launch(app: AppEntry) {
-        runCatching { launcherApps.startMainActivity(app.component, app.user, null, null) }
+    /** [from] and [options] let the app open out of the icon that was touched. */
+    fun launch(app: AppEntry, from: Rect? = null, options: Bundle? = null) {
+        runCatching { launcherApps.startMainActivity(app.component, app.user, from, options) }
             .onFailure { launchPackage(context, app.pkg) }
     }
 

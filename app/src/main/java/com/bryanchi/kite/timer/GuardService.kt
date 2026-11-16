@@ -82,6 +82,7 @@ class GuardService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(tick)
+        Grayscale.set(this, false)
         super.onDestroy()
     }
 
@@ -92,7 +93,8 @@ class GuardService : Service() {
             } catch (t: Throwable) {
                 Log.w(TAG, "tick failed", t)
             }
-            handler.postDelayed(this, 1000)
+            // Nothing to watch while the screen is off, so check far less often and save battery.
+            handler.postDelayed(this, if (power.isInteractive) 1000 else 5000)
         }
     }
 
@@ -114,6 +116,7 @@ class GuardService : Service() {
         lastTick = now
 
         val pkg = current
+        Grayscale.set(this, Kite.prefs.grayscale && power.isInteractive && pkg != null && pkg in Kite.prefs.social)
         if (power.isInteractive && pkg != null && pkg != packageName && pkg in Kite.prefs.social) {
             val timer = Kite.timer
             val freshOpen = pkg != lastSocialPkg && now - (lastSeen[pkg] ?: 0L) > 2 * 60_000L

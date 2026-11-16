@@ -42,6 +42,10 @@ object Perms {
     fun canNotify(c: Context) = Build.VERSION.SDK_INT < 33 ||
         c.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
+    /** Only grantable from a computer: adb shell pm grant com.bryanchi.kite android.permission.WRITE_SECURE_SETTINGS */
+    fun canWriteSecure(c: Context) =
+        c.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+
     private fun pkgUri(c: Context) = Uri.parse("package:${c.packageName}")
 
     fun openUsageAccess(c: Context) = start(c, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
