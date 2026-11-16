@@ -1,5 +1,6 @@
 package com.bryanchi.kite.ui
 
+import android.app.ActivityOptions
 import android.graphics.BitmapFactory
 import android.text.format.DateFormat
 import androidx.activity.compose.BackHandler
@@ -7,7 +8,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -40,7 +41,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,17 +48,19 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -79,38 +81,46 @@ import java.util.Date
 fun HomeScreen(vm: HomeViewModel) {
     val apps by vm.apps.collectAsState()
     val cards by vm.cards.collectAsState()
-    val haptic = LocalHapticFeedback.current
-    val scope = rememberCoroutineScope()
-    val wheel = remember { WheelState(scope) }
-    wheel.onTick = { haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+    val view = LocalView.current
+    val wheel = rememberWheel()
+    val thumbZonePx = with(LocalDensity.current) { 200.dp.toPx() }
     val byPkg = remember(apps) { apps.associateBy { it.pkg } }
-    val buckets = remember(apps, vm.tick) { buildBuckets(apps, Kite.prefs.launchTotals()) }
+    // Re-read what the wheel has learned every time home comes back.
+    val buckets = remember(apps, vm.tick) { buildBuckets(apps, Kite.prefs.wheelScores()) }
+    val homeIsOnTop = vm.overlay == Overlay.NONE && vm.cardDetail == null && vm.menuFor == null && !vm.onboarding
 
-    BackHandler(enabled = vm.overlay != Overlay.NONE || vm.cardDetail != null || vm.menuFor != null) { vm.back() }
+    BackHandler(enabled = !vm.onboarding && (vm.overlay != Overlay.NONE || vm.cardDetail != null || vm.menuFor != null)) { vm.back() }
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(Color(0x44000000), Color(0xAA000000))))
-            .pointerInput(buckets) {
-                detectDragGestures(
-                    onDragStart = { at -> wheel.start(at, buckets, size, density) },
-                    onDrag = { change, _ ->
-                        change.consume()
-                        wheel.move(change.position)
-                    },
-                    onDragEnd = {
-                        when (val r = wheel.release()) {
-                            is WheelResult.Launch -> { vm.wheelUsed(); vm.launch(r.app) }
-                            is WheelResult.Letter -> { vm.wheelUsed(); vm.openDrawer(r.letter) }
-                            null -> Unit
-                        }
-                    },
-                    onDragCancel = { wheel.cancel() },
-                )
+            // Keep Android's back swipe from stealing a wheel that starts at the edge, in the thumb zone.
+            .systemGestureExclusion { c ->
+                Rect(0f, c.size.height - thumbZonePx, c.size.width.toFloat(), c.size.height.toFloat())
+            }
+            .wheelGesture(wheel, buckets, enabled = homeIsOnTop) { r ->
+                when (r) {
+                    is WheelResult.Launch -> {
+                        vm.wheelUsed()
+                        // Open the app out of the icon the thumb let go on.
+                        val half = (r.sizePx / 2f).toInt()
+                        val x = r.center.x.toInt() - half
+                        val y = r.center.y.toInt() - half
+                        val options = runCatching {
+                            ActivityOptions.makeScaleUpAnimation(view, x, y, half * 2, half * 2).toBundle()
+                        }.getOrNull()
+                        vm.launch(r.app, android.graphics.Rect(x, y, x + half * 2, y + half * 2), options)
+                    }
+                    is WheelResult.Letter -> { vm.wheelUsed(); vm.openDrawer(r.letter) }
+                }
             },
     ) {
-        Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 24.dp)) {
+        Column(
+            Modifier.fillMaxSize()
+                .graphicsLayer { alpha = 1f - 0.8f * wheel.vis.value }
+                .systemBarsPadding().padding(horizontal = 24.dp),
+        ) {
             TopBar(onSettings = { vm.overlay = Overlay.SETTINGS }, needsSetup = !vm.perm.home || !vm.perm.timerReady)
             SocialStrip(vm, byPkg)
             if (cards.isNotEmpty()) {
@@ -119,10 +129,10 @@ fun HomeScreen(vm: HomeViewModel) {
             }
             Spacer(Modifier.weight(1f))
 
-            if (vm.wheelUses < 3) {
+            if (vm.wheelUses < 5) {
                 Text(
-                    "Tip: press and slide anywhere to open the letter wheel",
-                    color = Dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 12.dp),
+                    "Press anywhere and slide to open any app: along the letters to the one you want, then across onto the app.",
+                    color = Dim, fontSize = 13.sp, lineHeight = 17.sp, modifier = Modifier.padding(bottom = 12.dp),
                 )
             }
             val pinnedApps = vm.pinned.mapNotNull { byPkg[it] }
@@ -143,16 +153,17 @@ fun HomeScreen(vm: HomeViewModel) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 TextButton(onClick = { vm.openDrawer() }) { Text("All apps", color = Ink, fontSize = 16.sp) }
-                TextButton(onClick = { vm.openDrawer() }) { Text("Search", color = Dim, fontSize = 16.sp) }
+                TextButton(onClick = { vm.openDrawer(search = true) }) { Text("Search", color = Dim, fontSize = 16.sp) }
             }
         }
 
-        WheelOverlay(wheel)
+        WheelOverlay(wheel, vm.social, showHint = vm.wheelUses < 3)
 
         if (vm.overlay == Overlay.ALL_APPS) AllAppsScreen(vm, apps)
         if (vm.overlay == Overlay.SETTINGS) SettingsScreen(vm, byPkg)
         vm.cardDetail?.let { CardDetail(vm, it) }
         vm.menuFor?.let { AppMenu(vm, it) }
+        if (vm.onboarding) Onboarding(vm, buckets)
     }
 }
 
@@ -169,7 +180,7 @@ private fun TopBar(onSettings: () -> Unit, needsSetup: Boolean) {
             Text(DateFormat.format("EEEE, MMMM d", now).toString(), color = Dim, fontSize = 16.sp)
         }
         TextButton(onClick = onSettings) {
-            Text(if (needsSetup) "Set up ●" else "⋯", color = if (needsSetup) Accent else Ink, fontSize = 18.sp)
+            Text(if (needsSetup) "Finish setup" else "⋯", color = if (needsSetup) Accent else Ink, fontSize = if (needsSetup) 15.sp else 22.sp)
         }
     }
 }
@@ -202,12 +213,16 @@ private fun SocialStrip(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
     }
 }
 
+/** Stops touches on a full-screen sheet from reaching the home screen underneath it. */
+fun Modifier.blockTouches(): Modifier = this.pointerInput(Unit) {}
+
 @OptIn(ExperimentalFoundationApi::class)
 fun Modifier.combinedClickableCompat(onClick: () -> Unit, onLong: () -> Unit): Modifier =
     this.combinedClickable(onClick = onClick, onLongClick = onLong)
 
 @Composable
-fun AppRow(app: AppEntry, big: Boolean, tag: String? = null, onClick: () -> Unit, onLong: () -> Unit) {
+fun AppRow(app: AppEntry, big: Boolean, tag: String? = null, grey: Boolean = false, onClick: () -> Unit, onLong: () -> Unit) {
+    val greyFilter = remember { ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }) }
     Row(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .combinedClickableCompat(onClick, onLong)
@@ -215,7 +230,12 @@ fun AppRow(app: AppEntry, big: Boolean, tag: String? = null, onClick: () -> Unit
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val icon = app.icon
-        if (icon != null) Image(icon, null, Modifier.size(if (big) 38.dp else 34.dp))
+        if (icon != null) {
+            Image(
+                icon, null, Modifier.size(if (big) 38.dp else 34.dp).alpha(if (grey) 0.6f else 1f),
+                colorFilter = if (grey) greyFilter else null,
+            )
+        }
         Spacer(Modifier.width(16.dp))
         Text(
             app.label, fontSize = if (big) 22.sp else 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -277,7 +297,7 @@ private fun ParkedCard(card: Card, onClick: () -> Unit, onLong: () -> Unit) {
 private fun CardDetail(vm: HomeViewModel, card: Card) {
     val img = cardImage(card, 1)
     Column(
-        Modifier.fillMaxSize().background(Color(0xF20E0F12)).systemBarsPadding().padding(20.dp),
+        Modifier.fillMaxSize().background(Color(0xF20E0F12)).blockTouches().systemBarsPadding().padding(20.dp),
     ) {
         Text(card.appLabel, color = Accent, fontSize = 14.sp)
         Text(card.title, fontSize = 20.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -325,13 +345,14 @@ private fun AllAppsScreen(vm: HomeViewModel, apps: List<AppEntry>) {
         if (q.length < 2) emptyList()
         else cards.filter { c -> listOf(c.title, c.snippet, c.appLabel, c.webUri.orEmpty()).any { it.lowercase().contains(q) } }
     }
-    LaunchedEffect(letter) { if (letter == null) runCatching { focus.requestFocus() } }
+    // Only "Search" brings the keyboard up. "All apps" and the wheel just show the list.
+    LaunchedEffect(vm.drawerSearch) { if (vm.drawerSearch) runCatching { focus.requestFocus() } }
 
-    Column(Modifier.fillMaxSize().background(Color(0xF20E0F12)).systemBarsPadding().imePadding()) {
+    Column(Modifier.fillMaxSize().background(Color(0xF20E0F12)).blockTouches().systemBarsPadding().imePadding()) {
         LazyColumn(Modifier.weight(1f).padding(horizontal = 24.dp), reverseLayout = true) {
             // reverseLayout keeps the best matches next to the keyboard, under your thumb
             items(filtered, key = { it.key }) { app ->
-                AppRow(app, big = false, tag = if (app.pkg in vm.social) "timer" else null,
+                AppRow(app, big = false, tag = if (app.pkg in vm.social) "timer" else null, grey = app.pkg in vm.social,
                     onClick = { vm.launch(app) }, onLong = { vm.menuFor = app })
             }
             // Parked things that match the search (their saved on-screen text is searchable too).
@@ -354,7 +375,7 @@ private fun AllAppsScreen(vm: HomeViewModel, apps: List<AppEntry>) {
                 value = query,
                 onValueChange = { query = it },
                 modifier = Modifier.weight(1f).focusRequester(focus),
-                placeholder = { Text("Search apps") },
+                placeholder = { Text("Search apps and parked things") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                 keyboardActions = KeyboardActions(onGo = { filtered.firstOrNull()?.let { vm.launch(it) } }),

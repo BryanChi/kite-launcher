@@ -25,6 +25,20 @@ class Prefs(context: Context) {
         get() = sp.getInt("wheelUses", 0)
         set(v) = sp.edit().putInt("wheelUses", v).apply()
 
+    /** The first-run walkthrough has been finished or skipped. */
+    var onboarded: Boolean
+        get() = sp.getBoolean("onboarded", false)
+        set(v) = sp.edit().putBoolean("onboarded", v).apply()
+
+    var wheelHaptics: Boolean
+        get() = sp.getBoolean("wheelHaptics", true)
+        set(v) = sp.edit().putBoolean("wheelHaptics", v).apply()
+
+    /** Turn the whole screen grey while a social app is open. Needs a one-time permission from a computer. */
+    var grayscale: Boolean
+        get() = sp.getBoolean("grayscale", false)
+        set(v) = sp.edit().putBoolean("grayscale", v).apply()
+
     var autostartConfirmed: Boolean
         get() = sp.getBoolean("autostartConfirmed", false)
         set(v) = sp.edit().putBoolean("autostartConfirmed", v).apply()
@@ -69,7 +83,44 @@ class Prefs(context: Context) {
         log.put(key, log.optInt(key, 0) + 1)
         val total = JSONObject(sp.getString("launchTotals", "{}")!!)
         total.put(pkg, total.optInt(pkg, 0) + 1)
-        sp.edit().putString("hourlog", log.toString()).putString("launchTotals", total.toString()).apply()
+        val scores = decayedScores()
+        scores.put(pkg, scores.optDouble(pkg, 0.0) + 1.0)
+        sp.edit()
+            .putString("hourlog", log.toString())
+            .putString("launchTotals", total.toString())
+            .putString("scores", scores.toString())
+            .putLong("scoresDay", epochDay())
+            .apply()
+    }
+
+    private fun epochDay() = System.currentTimeMillis() / 86_400_000L
+
+    /**
+     * What the wheel learns from: launch counts that fade about 4% a day, so the order follows what
+     * you use these days without reshuffling every time. Starts from the all-time totals.
+     */
+    private fun decayedScores(): JSONObject {
+        val raw = sp.getString("scores", null) ?: return JSONObject(sp.getString("launchTotals", "{}")!!)
+        val src = JSONObject(raw)
+        val days = (epochDay() - sp.getLong("scoresDay", epochDay())).coerceIn(0L, 120L)
+        if (days == 0L) return src
+        val factor = Math.pow(0.96, days.toDouble())
+        val out = JSONObject()
+        val keys = src.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            val v = src.optDouble(k, 0.0) * factor
+            if (v >= 0.05) out.put(k, v)
+        }
+        return out
+    }
+
+    fun wheelScores(): Map<String, Double> {
+        val o = decayedScores()
+        val out = HashMap<String, Double>()
+        val keys = o.keys()
+        while (keys.hasNext()) { val k = keys.next(); out[k] = o.optDouble(k, 0.0) }
+        return out
     }
 
     fun hourScores(hour: Int): Map<String, Int> {

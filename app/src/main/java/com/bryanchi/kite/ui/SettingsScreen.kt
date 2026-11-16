@@ -46,10 +46,6 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
     @Suppress("UNUSED_VARIABLE") val t = vm.tick
     val p = vm.perm
     val timer = Kite.timer
-    val homeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { vm.refresh() }
-    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        vm.refresh(); GuardService.start(context)
-    }
 
     Column(
         Modifier.fillMaxSize().background(Color(0xFA0E0F12)).systemBarsPadding()
@@ -61,35 +57,19 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
         }
 
         Section("Set up")
-        SetupRow("Make Kite your home screen", "vivo may switch back after big updates. If so, do this again.", p.home) {
-            val i = Perms.homeRoleIntent(context)
-            if (i != null) homeLauncher.launch(i) else Perms.openHomeSettings(context)
+        SetupRows(vm, SetupGroup.HOME)
+        SetupRows(vm, SetupGroup.TIMER)
+        SetupRows(vm, SetupGroup.PARKING)
+        TextButton(onClick = { vm.replayOnboarding() }) { Text("Replay the walkthrough", color = Dim) }
+
+        Section("Letter wheel")
+        ToggleRow("Vibrate on each letter", "Small ticks as you sweep, a click when you reach the apps.", Kite.prefs.wheelHaptics) {
+            Kite.prefs.wheelHaptics = it; vm.bump()
         }
-        SetupRow("Usage access", "Lets the social timer see which app is open.", p.usage) { Perms.openUsageAccess(context) }
-        SetupRow("Display over other apps", "Lets the timer put the block screen on top of a social app.", p.overlay) { Perms.openOverlay(context) }
-        if (Build.VERSION.SDK_INT >= 33) {
-            SetupRow("Notifications", "Shows minutes left in the notification shade.", p.notify) {
-                notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-        SetupRow("Unrestricted battery", "Stops OriginOS from killing the timer in the background.", p.battery) { Perms.openBattery(context) }
-        val autostartExtra: (@Composable () -> Unit)? = if (p.autostart) null else {
-            {
-                TextButton(onClick = { Kite.prefs.autostartConfirmed = true; vm.refresh() }) { Text("I did it", color = Dim) }
-            }
-        }
-        SetupRow(
-            "vivo Autostart",
-            "Find Kite in the list and switch it on. Android can't confirm this, so tap \"I did it\" afterwards.",
-            p.autostart,
-            extra = autostartExtra,
-        ) { Perms.openVivoAutostart(context) }
-        SetupRow(
-            "Digital assistant: Kite",
-            "Then long-press home (or swipe up from a bottom corner) in any app to park what's on screen. " +
-                "On vivo: Settings › Apps › Default apps › Digital assistant app. Turn on \"Use screenshot\" too.",
-            p.assistant,
-        ) { Perms.openAssistant(context) }
+        Text(
+            "The wheel learns: apps you open most sit straight across from their letter, and letters you use most get more room.",
+            color = Dim, fontSize = 13.sp, lineHeight = 17.sp,
+        )
 
         Section("Social timer")
         val used = timer.usedMs() / 60_000
@@ -154,8 +134,17 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
         }
         Text("Add more: long-press any app in All apps.", color = Dim, fontSize = 13.sp)
 
+        Spacer(Modifier.height(12.dp))
+        ToggleRow(
+            "Grey screen in social apps",
+            if (p.secure) "The whole screen loses its colour while a timed app is open. Experimental: not yet tried on vivo."
+            else "Needs a one-time command from a computer with USB debugging on:\nadb shell pm grant com.bryanchi.kite android.permission.WRITE_SECURE_SETTINGS",
+            Kite.prefs.grayscale && p.secure,
+            enabled = p.secure,
+        ) { Kite.prefs.grayscale = it; vm.bump() }
+
         Section("How Kite works")
-        Help("Letter wheel", "Press anywhere on home and slide. Rest on a letter, then slide onto an app and let go. Let go on a letter to see all its apps.")
+        Help("Letter wheel", "Press anywhere on home and slide. Slide along the letters, then across onto an app and let go. The app you use most is straight across from its letter. Let go on a letter to see all its apps. Slide back toward the edge of the screen to cancel.")
         Help("Pinned apps", "Your pinned apps sit in the thumb zone and never move. One \"now\" slot under them changes with the time of day.")
         Help("Parking lot", "Use the assistant gesture in any app, or Share › Park in Kite. Tap a card to jump back to that exact page when the app supports it. Cards disappear after 24 hours unless you keep them.")
         Help("Social timer", "Each open from Kite has a pause that grows (5 s, 10 s, 20 s, 30 s). When your budget runs out, or during blackout, the app is covered. The only way through is waiting on the block screen, and each wait doubles.")
@@ -166,6 +155,65 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
 @Composable
 private fun Section(title: String) {
     Text(title.uppercase(), color = Accent, fontSize = 12.sp, letterSpacing = 1.5.sp, modifier = Modifier.padding(top = 26.dp, bottom = 8.dp))
+}
+
+enum class SetupGroup { HOME, TIMER, PARKING }
+
+/** The permission checklist, shared by Settings and the first-run walkthrough. */
+@Composable
+fun SetupRows(vm: HomeViewModel, group: SetupGroup) {
+    val context = LocalContext.current
+    val p = vm.perm
+    val homeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { vm.refresh() }
+    val notifLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
+        vm.refresh(); GuardService.start(context)
+    }
+    when (group) {
+        SetupGroup.HOME -> SetupRow("Make Kite your home screen", "vivo may switch back after big updates. If so, do this again.", p.home) {
+            val i = Perms.homeRoleIntent(context)
+            if (i != null) runCatching { homeLauncher.launch(i) }.onFailure { Perms.openHomeSettings(context) }
+            else Perms.openHomeSettings(context)
+        }
+        SetupGroup.TIMER -> {
+            SetupRow("Usage access", "Lets the social timer see which app is open.", p.usage) { Perms.openUsageAccess(context) }
+            SetupRow("Display over other apps", "Lets the timer put the block screen on top of a social app.", p.overlay) { Perms.openOverlay(context) }
+            if (Build.VERSION.SDK_INT >= 33) {
+                SetupRow("Notifications", "Shows minutes left in the notification shade.", p.notify) {
+                    notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+            SetupRow("Unrestricted battery", "Stops OriginOS from killing the timer in the background.", p.battery) { Perms.openBattery(context) }
+            val autostartExtra: (@Composable () -> Unit)? = if (p.autostart) null else {
+                {
+                    TextButton(onClick = { Kite.prefs.autostartConfirmed = true; vm.refresh() }) { Text("I did it", color = Dim) }
+                }
+            }
+            SetupRow(
+                "vivo Autostart",
+                "Find Kite in the list and switch it on. Android can't confirm this, so tap \"I did it\" afterwards.",
+                p.autostart,
+                extra = autostartExtra,
+            ) { Perms.openVivoAutostart(context) }
+        }
+        SetupGroup.PARKING -> SetupRow(
+            "Digital assistant: Kite",
+            "Then long-press home (or swipe up from a bottom corner) in any app to park what's on screen. " +
+                "On vivo: Settings › Apps › Default apps › Digital assistant app. Turn on \"Use screenshot\" too.",
+            p.assistant,
+        ) { Perms.openAssistant(context) }
+    }
+}
+
+@Composable
+private fun ToggleRow(title: String, detail: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 17.sp)
+            Text(detail, color = Dim, fontSize = 13.sp, lineHeight = 17.sp)
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = checked, enabled = enabled, onCheckedChange = onChange)
+    }
 }
 
 @Composable

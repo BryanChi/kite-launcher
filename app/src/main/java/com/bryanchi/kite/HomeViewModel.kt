@@ -17,6 +17,9 @@ import com.bryanchi.kite.data.Card
 import com.bryanchi.kite.data.Perms
 import com.bryanchi.kite.data.SocialDay
 import com.bryanchi.kite.timer.GateActivity
+import com.bryanchi.kite.timer.Grayscale
+import android.graphics.Rect
+import android.os.Bundle
 import kotlinx.coroutines.launch
 import java.util.Calendar
 
@@ -30,6 +33,7 @@ data class PermState(
     val battery: Boolean = false,
     val autostart: Boolean = false,
     val assistant: Boolean = false,
+    val secure: Boolean = false,
 ) {
     val timerReady get() = usage && overlay && battery && autostart
 }
@@ -55,6 +59,12 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var overlay by mutableStateOf(Overlay.NONE)
     var drawerLetter by mutableStateOf<Char?>(null)
+    /** True when the drawer was opened to type, so the keyboard comes up straight away. */
+    var drawerSearch by mutableStateOf(false)
+        private set
+    /** The first-run walkthrough is showing. */
+    var onboarding by mutableStateOf(!Kite.prefs.onboarded)
+        private set
     var cardDetail by mutableStateOf<Card?>(null)
     var menuFor by mutableStateOf<AppEntry?>(null)
     var perm by mutableStateOf(PermState())
@@ -88,7 +98,10 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
             battery = Perms.ignoresBattery(ctx),
             autostart = Kite.prefs.autostartConfirmed,
             assistant = Perms.isAssistant(ctx),
+            secure = Perms.canWriteSecure(ctx),
         )
+        // Home is never a social app: make sure the screen is back in colour.
+        Grayscale.set(ctx, false)
         apps.value.takeIf { it.isNotEmpty() }?.let { seedPinned(it); computeNow(it) }
         Kite.apps.reloadAsync()
         tick++
@@ -100,25 +113,36 @@ class HomeViewModel(app: Application) : AndroidViewModel(app) {
         when {
             cardDetail != null -> cardDetail = null
             menuFor != null -> menuFor = null
-            else -> { overlay = Overlay.NONE; drawerLetter = null }
+            else -> { overlay = Overlay.NONE; drawerLetter = null; drawerSearch = false }
         }
     }
 
     fun closeAll() {
-        cardDetail = null; menuFor = null; overlay = Overlay.NONE; drawerLetter = null
+        cardDetail = null; menuFor = null; overlay = Overlay.NONE; drawerLetter = null; drawerSearch = false
     }
 
-    fun openDrawer(letter: Char? = null) {
+    fun openDrawer(letter: Char? = null, search: Boolean = false) {
         drawerLetter = letter
+        drawerSearch = search
         overlay = Overlay.ALL_APPS
     }
 
-    fun launch(app: AppEntry) {
+    fun finishOnboarding() {
+        Kite.prefs.onboarded = true
+        onboarding = false
+    }
+
+    fun replayOnboarding() {
+        closeAll()
+        onboarding = true
+    }
+
+    fun launch(app: AppEntry, from: Rect? = null, options: Bundle? = null) {
         if (app.pkg in social) {
             ctx.startActivity(GateActivity.pauseIntent(ctx, app.pkg))
         } else {
             Kite.prefs.recordLaunch(app.pkg)
-            Kite.apps.launch(app)
+            Kite.apps.launch(app, from, options)
         }
         closeAll()
     }
