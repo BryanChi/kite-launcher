@@ -68,6 +68,15 @@
             android:label="@string/capture_shortcut_label"
             android:theme="@style/Theme.Kite.Invisible" />
 
+        <!-- Reads a just-copied link onto the card being parked; only the focused app may read the clipboard -->
+        <activity
+            android:name=".capture.ClipGrabActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="com.bryanchi.kite.clipgrab"
+            android:theme="@style/Theme.Kite.Invisible" />
+
         <!-- Park from anywhere: volume up + down together, accessibility button -->
         <service
             android:name=".capture.CaptureService"

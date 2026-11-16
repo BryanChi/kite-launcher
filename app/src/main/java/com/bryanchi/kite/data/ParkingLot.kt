@@ -106,6 +106,20 @@ class ParkingLot(private val context: Context) {
         name
     }.getOrNull()
 
+    /** Fills in the link (and title and text, when given) of an existing card, keeping its picture and expiry. */
+    @Synchronized
+    fun updateLink(id: String, webUri: String?, title: String?, snippet: String?): Boolean {
+        if (_cards.value.none { it.id == id }) return false
+        persist(_cards.value.map {
+            if (it.id != id) it else it.copy(
+                webUri = webUri ?: it.webUri,
+                title = title?.takeIf { t -> t.isNotBlank() }?.take(200) ?: it.title,
+                snippet = snippet?.takeIf { t -> t.isNotBlank() }?.take(2000) ?: it.snippet,
+            )
+        })
+        return true
+    }
+
     /** Sets the picture on an existing card, if it has none yet. */
     @Synchronized
     fun attachImage(id: String, screenshot: Bitmap) {

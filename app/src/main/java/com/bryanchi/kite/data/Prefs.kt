@@ -39,6 +39,11 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("grayscale", false)
         set(v) = sp.edit().putBoolean("grayscale", v).apply()
 
+    /** After a park, press the app's Share button to get the exact link. */
+    var grabLink: Boolean
+        get() = sp.getBoolean("grabLink", true)
+        set(v) = sp.edit().putBoolean("grabLink", v).apply()
+
     /** Dim: a translucent black layer over the whole screen, for a dark room. */
     var dimOn: Boolean
         get() = sp.getBoolean("dimOn", false)

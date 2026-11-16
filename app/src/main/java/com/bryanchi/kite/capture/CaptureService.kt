@@ -86,6 +86,28 @@ class CaptureService : AccessibilityService() {
             s.handler.postDelayed({ s.attachShot(cardId, toast) }, delayMs)
         }
 
+        /** The card a link hunt is filling in, and when it started. */
+        @Volatile private var pendingCardId: String? = null
+        @Volatile private var pendingAt = 0L
+
+        /**
+         * The card a link hunt just made, if it started in the last few seconds. ShareActivity and
+         * ClipGrabActivity use it to fill in that card instead of making a new one. Taking it clears it.
+         */
+        fun takePending(): String? {
+            val id = pendingCardId ?: return null
+            pendingCardId = null
+            return id.takeIf { System.currentTimeMillis() - pendingAt < PENDING_MS }
+        }
+
+        /** ShareActivity or ClipGrabActivity has put the link on the pending card. */
+        fun linkArrived() {
+            val s = instance ?: return
+            s.handler.post { s.hunt?.linkArrived() }
+        }
+
+        private const val PENDING_MS = 6000L
+
         /** True while the Dim layer is on screen. */
         val isDimmed get() = instance?.dimView != null
 
@@ -159,7 +181,8 @@ class CaptureService : AccessibilityService() {
         return p.x to p.y
     }
 
-    private val handler = Handler(Looper.getMainLooper())
+    internal val handler = Handler(Looper.getMainLooper())
+    private var hunt: LinkHunt? = null
     /** The last real app on screen (never a launcher, Kite or the shade) and when it was seen. */
     private var lastPkg: String? = null
     private var lastSeenAt = 0L
@@ -197,6 +220,7 @@ class CaptureService : AccessibilityService() {
 
     override fun onDestroy() {
         hideDim()
+        hunt = null
         runCatching { accessibilityButtonController.unregisterAccessibilityButtonCallback(buttonCallback) }
         if (instance === this) instance = null
         super.onDestroy()
@@ -205,7 +229,11 @@ class CaptureService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // Remember the last real app on screen, so a capture fired from the shade or a shortcut
         // still knows which app it was about.
-        if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val type = event?.eventType ?: return
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            hunt?.windowChanged()
+        }
+        if (type != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
         if (pkg == waitPkg) {
             Log.d(TAG, "$pkg is back on screen")
@@ -401,13 +429,38 @@ class CaptureService : AccessibilityService() {
             ?: read.text.lineSequence().map { it.trim() }.firstOrNull { it.length in 3..120 && it != label }
             ?: label
         Thread {
-            val ok = runCatching { Kite.parking.add(read.pkg, label, title, read.text, read.url, null, shot) }.isSuccess
-            Log.d(TAG, "saved card: app=$label pkg=${read.pkg} ok=$ok image=${shot != null}")
+            val card = runCatching { Kite.parking.add(read.pkg, label, title, read.text, read.url, null, shot) }.getOrNull()
+            Log.d(TAG, "saved card: app=$label pkg=${read.pkg} ok=${card != null} image=${shot != null} url=${read.url}")
             handler.post {
-                busy = false
-                Toast.makeText(this, if (ok) "Parked ✓  $label" else "Couldn't park that", Toast.LENGTH_SHORT).show()
+                val pkg = read.pkg
+                if (card != null && read.url == null && pkg != null && !isExcluded(pkg) && Kite.prefs.grabLink) {
+                    huntLink(card.id, pkg, label)
+                } else {
+                    busy = false
+                    val msg = when {
+                        card == null -> "Couldn't park that"
+                        read.url != null -> "Parked ✓  $label · link saved"
+                        else -> "Parked ✓  $label"
+                    }
+                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                }
             }
         }.start()
+    }
+
+    /** Presses the app's Share button for the exact link; see [LinkHunt]. The card already exists. */
+    private fun huntLink(cardId: String, pkg: String, label: String) {
+        pendingCardId = cardId
+        pendingAt = System.currentTimeMillis()
+        Log.d(TAG, "hunt: start for $pkg card=$cardId")
+        val h = LinkHunt(this, pkg, ::isExcluded) { linked ->
+            hunt = null
+            pendingCardId = null
+            busy = false
+            Toast.makeText(this, if (linked) "Parked ✓  $label · link saved" else "Parked ✓  $label (no link)", Toast.LENGTH_SHORT).show()
+        }
+        hunt = h
+        h.start()
     }
 
     private fun buzz() {

@@ -35,6 +35,25 @@ class ShareActivity : ComponentActivity() {
         val appLabel = source?.let { AppRepository.label(this, it) } ?: "Shared"
         val title = subject.ifBlank { text.lineSequence().firstOrNull { it.isNotBlank() }?.take(120) ?: appLabel }
 
+        // The park link hunt pressed Share › Park in Kite for us: fill in the card it just made
+        // (which has the screenshot) instead of making a second one.
+        CaptureService.takePending()?.let { pending ->
+            // Many apps share just the link; then keep the text read off the screen.
+            val onlyLink = Patterns.WEB_URL.matcher(text.trim()).matches()
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) {
+                    Kite.parking.updateLink(
+                        pending, url,
+                        subject.ifBlank { null },
+                        text.takeIf { !onlyLink && it.isNotBlank() },
+                    )
+                }
+                CaptureService.linkArrived()
+                finish()
+            }
+            return
+        }
+
         lifecycleScope.launch {
             val bmp = stream?.let { uri ->
                 withContext(Dispatchers.IO) {

@@ -69,6 +69,12 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
         SetupRows(vm, SetupGroup.HOME)
         SetupRows(vm, SetupGroup.TIMER)
         SetupRows(vm, SetupGroup.PARKING)
+        ToggleRow(
+            "Grab the exact link",
+            "Presses the app's Share button for you after a park, then \"Park in Kite\" or \"Copy link\", so the card " +
+                "opens the exact post. Takes a few seconds; if it can't find one, the card keeps just the screenshot.",
+            Kite.prefs.grabLink,
+        ) { Kite.prefs.grabLink = it; vm.bump() }
         TextButton(onClick = { vm.replayOnboarding() }) { Text("Replay the walkthrough", color = Dim) }
 
         Section("Letter wheel")
