@@ -50,6 +50,9 @@ class GuardService : Service() {
     private var lastTick = 0L
     private var lastNotif = 0L
     private var lastGate = 0L
+    private var lastSocialPkg: String? = null
+    /** Last time each social app was on screen, to tell a fresh open from a quick app switch. */
+    private val lastSeen = HashMap<String, Long>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -113,18 +116,31 @@ class GuardService : Service() {
         val pkg = current
         if (power.isInteractive && pkg != null && pkg != packageName && pkg in Kite.prefs.social) {
             val timer = Kite.timer
-            timer.addUsage(delta)
-            if (timer.lockReason(now) != null && !GateActivity.isShowing && now - lastGate > 1500) {
-                lastGate = now
-                runCatching { startActivity(GateActivity.blockIntent(this, pkg)) }
-                    .onFailure { Log.w(TAG, "could not show block screen (overlay permission?)", it) }
+            val freshOpen = pkg != lastSocialPkg && now - (lastSeen[pkg] ?: 0L) > 2 * 60_000L
+            lastSocialPkg = pkg
+            lastSeen[pkg] = now
+            when {
+                timer.lockReason(now) != null -> showGate(now, GateActivity.blockIntent(this, pkg))
+                // Opened some other way (notification, recents, a link): same pause as opening from Kite.
+                freshOpen && !timer.recentlyApproved(pkg, now) ->
+                    showGate(now, GateActivity.pauseOverIntent(this, pkg))
+                else -> timer.addUsage(delta)
             }
+        } else if (pkg != packageName) {
+            lastSocialPkg = null
         }
 
         if (now - lastNotif > 15_000) {
             lastNotif = now
             getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification())
         }
+    }
+
+    private fun showGate(now: Long, intent: Intent) {
+        if (GateActivity.isShowing || now - lastGate < 1500) return
+        lastGate = now
+        runCatching { startActivity(intent) }
+            .onFailure { Log.w(TAG, "could not show gate (overlay permission?)", it) }
     }
 
     private fun buildNotification(): Notification {

@@ -50,6 +50,11 @@ class GateActivity : ComponentActivity() {
             .putExtra("mode", "pause").putExtra("pkg", pkg)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
+        /** Pause shown on top of an app that was opened outside Kite. "Continue" just reveals it. */
+        fun pauseOverIntent(c: Context, pkg: String) = Intent(c, GateActivity::class.java)
+            .putExtra("mode", "pauseOver").putExtra("pkg", pkg)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
         fun blockIntent(c: Context, pkg: String) = Intent(c, GateActivity::class.java)
             .putExtra("mode", "block").putExtra("pkg", pkg)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -100,6 +105,12 @@ class GateActivity : ComponentActivity() {
 
     private fun openApp(countOpen: Boolean) {
         if (countOpen) Kite.timer.recordOpen()
+        Kite.timer.markApproved(pkg)
+        if (mode == "pauseOver") {
+            // The app (and whatever the notification opened) is already underneath.
+            finish()
+            return
+        }
         Kite.prefs.recordLaunch(pkg)
         AppRepository.launchPackage(this, pkg)
         finish()
@@ -129,7 +140,7 @@ private fun GateScreen(
         Modifier.fillMaxSize().systemBarsPadding().padding(32.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        if (reason == null && mode == "pause") {
+        if (reason == null && (mode == "pause" || mode == "pauseOver")) {
             var left by remember(pkg, visit) { mutableIntStateOf(timer.pauseSeconds()) }
             LaunchedEffect(pkg, visit) {
                 while (left > 0) { delay(1000); left-- }
@@ -143,7 +154,7 @@ private fun GateScreen(
             )
             Spacer(Modifier.height(40.dp))
             Button(onClick = { onOpen(true) }, enabled = left == 0, modifier = Modifier.fillMaxWidth()) {
-                Text(if (left > 0) "Open in $left s" else "Open $label")
+                Text(if (left > 0) "Open in $left s" else if (mode == "pauseOver") "Continue to $label" else "Open $label")
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = onHome, modifier = Modifier.fillMaxWidth()) { Text("Not now") }

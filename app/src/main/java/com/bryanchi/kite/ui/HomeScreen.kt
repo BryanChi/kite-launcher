@@ -319,6 +319,12 @@ private fun AllAppsScreen(vm: HomeViewModel, apps: List<AppEntry>) {
             else -> apps
         }
     }
+    val cards by vm.cards.collectAsState()
+    val parked = remember(query, cards) {
+        val q = query.trim().lowercase()
+        if (q.length < 2) emptyList()
+        else cards.filter { c -> listOf(c.title, c.snippet, c.appLabel, c.webUri.orEmpty()).any { it.lowercase().contains(q) } }
+    }
     LaunchedEffect(letter) { if (letter == null) runCatching { focus.requestFocus() } }
 
     Column(Modifier.fillMaxSize().background(Color(0xF20E0F12)).systemBarsPadding().imePadding()) {
@@ -327,6 +333,17 @@ private fun AllAppsScreen(vm: HomeViewModel, apps: List<AppEntry>) {
             items(filtered, key = { it.key }) { app ->
                 AppRow(app, big = false, tag = if (app.pkg in vm.social) "timer" else null,
                     onClick = { vm.launch(app) }, onLong = { vm.menuFor = app })
+            }
+            // Parked things that match the search (their saved on-screen text is searchable too).
+            items(parked, key = { "card-" + it.id }) { card ->
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                        .combinedClickableCompat(onClick = { vm.closeAll(); vm.openCard(card) }, onLong = { vm.cardDetail = card })
+                        .padding(vertical = 8.dp),
+                ) {
+                    Text("Parked · ${card.appLabel}", color = Accent, fontSize = 12.sp)
+                    Text(card.title, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

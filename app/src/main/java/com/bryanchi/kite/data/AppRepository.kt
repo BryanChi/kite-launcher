@@ -30,15 +30,28 @@ data class AppEntry(
     val user: UserHandle,
     val icon: ImageBitmap?,
 ) {
-    /** Letter-wheel bucket: A-Z, '#' for digits, '•' for everything else (e.g. Japanese labels). */
-    val bucket: Char by lazy {
-        val c = Normalizer.normalize(label, Normalizer.Form.NFKC).trim().firstOrNull()?.uppercaseChar() ?: '•'
-        when {
-            c in 'A'..'Z' -> c
-            c.isDigit() -> '#'
-            else -> '•'
-        }
+    /** Letter-wheel bucket: A-Z, kana rows (あ か さ …) for Japanese names, '#' for digits, '•' for the rest. */
+    val bucket: Char by lazy { bucketOf(label) }
+}
+
+/** Wheel order: A-Z, then the kana rows, then digits, then everything else. */
+val BUCKET_ORDER: List<Char> = ('A'..'Z').toList() + "あかさたなはまやらわ".toList() + listOf('#', '•')
+
+private val KANA_ROWS = listOf(
+    'ぁ' to 'あ', 'か' to 'か', 'さ' to 'さ', 'た' to 'た', 'な' to 'な',
+    'は' to 'は', 'ま' to 'ま', 'ゃ' to 'や', 'ら' to 'ら', 'ゎ' to 'わ',
+)
+
+fun bucketOf(label: String): Char {
+    var c = Normalizer.normalize(label, Normalizer.Form.NFKC).trim().firstOrNull()?.uppercaseChar() ?: return '•'
+    if (c in 'A'..'Z') return c
+    if (c.isDigit()) return '#'
+    if (c in '\u30A1'..'\u30F6') c = c - 0x60 // katakana → hiragana
+    if (c in '\u3041'..'\u3096') {
+        if (c == 'ゔ') return 'あ'
+        return KANA_ROWS.last { (start, _) -> c >= start }.second
     }
+    return '•'
 }
 
 class AppRepository(private val context: Context) {

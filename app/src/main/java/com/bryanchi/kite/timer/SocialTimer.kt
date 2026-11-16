@@ -97,6 +97,18 @@ class SocialTimer(private val sp: SharedPreferences) {
     /** 5s, 10s, 20s, then 30s for every further open today. */
     fun pauseSeconds(): Int = listOf(5, 10, 20, 30)[minOf(opensToday(), 3)]
 
+    // In-memory: which social app was just let through a gate, so the watcher doesn't gate it twice.
+    @Volatile private var approvedPkg: String? = null
+    @Volatile private var approvedAt = 0L
+
+    fun markApproved(pkg: String) {
+        approvedPkg = pkg
+        approvedAt = System.currentTimeMillis()
+    }
+
+    fun recentlyApproved(pkg: String, now: Long = System.currentTimeMillis()) =
+        approvedPkg == pkg && now - approvedAt < 15_000
+
     fun escapesToday(): Int = sp.getInt("escapes_${today()}", 0)
 
     /** 2 min, 4, 8, 16, capped at 30. */

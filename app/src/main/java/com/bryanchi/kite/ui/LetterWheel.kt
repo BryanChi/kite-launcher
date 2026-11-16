@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bryanchi.kite.data.AppEntry
+import com.bryanchi.kite.data.BUCKET_ORDER
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -43,7 +44,7 @@ sealed interface WheelResult {
 
 /** Groups apps by first letter; inside a letter, most-launched first. */
 fun buildBuckets(apps: List<AppEntry>, launches: Map<String, Int>): Map<Char, List<AppEntry>> {
-    val order: (Char) -> Int = { c -> if (c in 'A'..'Z') c - 'A' else if (c == '#') 26 else 27 }
+    val order: (Char) -> Int = { c -> BUCKET_ORDER.indexOf(c).let { if (it < 0) BUCKET_ORDER.size else it } }
     return apps.groupBy { it.bucket }
         .toSortedMap(compareBy<Char> { order(it) })
         .mapValues { (_, list) ->
@@ -82,7 +83,9 @@ class WheelState(private val scope: CoroutineScope) {
     private var px = 1f
     private var width = 0f
     private var height = 0f
-    private var dir = 90.0
+    /** True when the press started on the left half of the screen: assume the left thumb. */
+    var leftHand by mutableStateOf(false)
+        private set
     private var finger = Offset.Zero
     private var dwell: Job? = null
 
@@ -94,12 +97,8 @@ class WheelState(private val scope: CoroutineScope) {
         height = size.height.toFloat()
         origin = at
         finger = at
-        // Fan opens away from the edge your thumb is on.
-        dir = when {
-            at.x < width * 0.33f -> 60.0
-            at.x > width * 0.67f -> 120.0
-            else -> 90.0
-        }
+        // Which thumb? Left half of the screen = left thumb, right half = right thumb.
+        leftHand = at.x < width / 2f
         letters = b.keys.toList()
         letterPos = fan(letters.size, at, 112f * px, 60f * px)
         stage = 0
@@ -161,19 +160,25 @@ class WheelState(private val scope: CoroutineScope) {
         return if (bestD < 46f * px) best else -1
     }
 
-    /** Items on one or two arcs spanning 150°, centred on [dir], clamped to the screen. */
+    /**
+     * Items on one or two arcs that follow the thumb's natural sweep, clamped to the screen.
+     * Left thumb: first item straight up, sweeping clockwise out to the right.
+     * Right thumb: mirrored, first item straight up, sweeping out to the left.
+     * The first items (A, B, C… or the most-used apps) are always the easiest to reach.
+     */
     private fun fan(n: Int, o: Offset, r1: Float, gap: Float): List<Offset> {
         if (n == 0) return emptyList()
         val rings = if (n <= 9) 1 else 2
         val perRing = ceil(n / rings.toDouble()).toInt()
-        val span = 150.0
+        val startDeg = if (leftHand) 112.0 else 68.0
+        val endDeg = if (leftHand) -12.0 else 192.0
         val margin = 22f * px
         return (0 until n).map { i ->
             val ring = i / perRing
             val idx = i % perRing
             val inRing = if (ring == rings - 1) n - ring * perRing else perRing
             val frac = if (inRing == 1) 0.5 else idx / (inRing - 1).toDouble()
-            val deg = dir + span / 2 - frac * span
+            val deg = startDeg + frac * (endDeg - startDeg)
             val rad = Math.toRadians(deg)
             val r = r1 + ring * gap
             Offset(
@@ -196,7 +201,9 @@ fun WheelOverlay(w: WheelState) {
         }
         Text(
             title,
-            Modifier.align(Alignment.TopCenter).padding(top = 110.dp),
+            // Keep the label on the side away from the thumb so it isn't covered.
+            Modifier.align(if (w.leftHand) Alignment.TopEnd else Alignment.TopStart)
+                .padding(top = 110.dp, start = 28.dp, end = 28.dp),
             fontSize = 30.sp,
             fontWeight = FontWeight.Light,
         )
