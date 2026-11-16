@@ -4,8 +4,13 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// CI run number becomes the version code so each new APK installs over the last one.
-val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+// The version comes from the number of commits, so a build from Android Studio and a build from
+// GitHub of the same code get the same number, and every newer commit installs over an older one.
+// The +10 keeps it above the 0.1.5 that GitHub built before this change.
+val buildNumber = 10 + (runCatching {
+    providers.exec { commandLine("git", "rev-list", "--count", "HEAD") }
+        .standardOutput.asText.get().trim().toInt()
+}.getOrNull() ?: 0)
 
 android {
     namespace = "com.bryanchi.kite"
