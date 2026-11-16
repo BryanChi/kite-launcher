@@ -16,6 +16,7 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
+import android.util.Log
 import android.util.Patterns
 import android.view.Display
 import android.view.Gravity
@@ -65,6 +66,24 @@ class CaptureService : AccessibilityService() {
             val s = instance ?: return false
             s.handler.postDelayed({ s.capture() }, delayMs)
             return true
+        }
+
+        private const val TAG = "KiteCapture"
+        private val WAIT_TOKEN = Any()
+        /** How long to wait for the app to come back before parking anyway. */
+        private const val WAIT_MS = 1500L
+        /** Time for the app to finish drawing once it's back. */
+        private const val SETTLE_MS = 250L
+        /** Only bring back an app that was on screen this recently. */
+        private const val RECENT_MS = 10 * 60_000L
+
+        /**
+         * Adds a screenshot of whatever is on screen after [delayMs] to card [cardId], if the
+         * service is running and a real app (not home or Kite) is in front.
+         */
+        fun attachScreenshot(cardId: String, delayMs: Long, toast: String) {
+            val s = instance ?: return
+            s.handler.postDelayed({ s.attachShot(cardId, toast) }, delayMs)
         }
 
         /** True while the Dim layer is on screen. */
@@ -141,8 +160,15 @@ class CaptureService : AccessibilityService() {
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    /** The last real app on screen (never a launcher, Kite or the shade) and when it was seen. */
     private var lastPkg: String? = null
+    private var lastSeenAt = 0L
     private var busy = false
+    /** Home screens, Kite and system UI: never what the user means to park. */
+    private var excluded: Set<String> = emptySet()
+    /** While bringing an app back before a capture: the package we're waiting to see, and what to do then. */
+    private var waitPkg: String? = null
+    private var onBack: (() -> Unit)? = null
 
     // Volume combo state
     private var upHeld = false
@@ -157,6 +183,8 @@ class CaptureService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        excluded = findExcluded()
+        Log.d(TAG, "connected; excluded=$excluded")
         runCatching { accessibilityButtonController.registerAccessibilityButtonCallback(buttonCallback) }
         if (Kite.prefs.dimOn) showDim()
     }
@@ -179,8 +207,28 @@ class CaptureService : AccessibilityService() {
         // still knows which app it was about.
         if (event?.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName || pkg == "com.android.systemui" || pkg.startsWith("com.vivo.upslide")) return
+        if (pkg == waitPkg) {
+            Log.d(TAG, "$pkg is back on screen")
+            waitPkg = null
+            handler.removeCallbacksAndMessages(WAIT_TOKEN)
+            handler.postDelayed({ onBack?.invoke(); onBack = null }, SETTLE_MS)
+        }
+        if (isExcluded(pkg) || pkg.startsWith("com.vivo.upslide")) return
         lastPkg = pkg
+        lastSeenAt = System.currentTimeMillis()
+    }
+
+    private fun isExcluded(pkg: String) =
+        pkg in excluded || pkg == packageName || pkg == "com.android.systemui" || pkg.contains("launcher")
+
+    /** Every installed home screen (vivo's com.bbk.launcher2 and the like), plus Kite and the shade. */
+    private fun findExcluded(): Set<String> {
+        val home = runCatching {
+            packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0)
+                .map { it.activityInfo.packageName }
+        }.getOrDefault(emptyList())
+        // Settings answers HOME only as a fallback during boot; it's a real app the rest of the time.
+        return (home - "com.android.settings").toSet() + setOf(packageName, "com.android.systemui", "com.bbk.launcher2")
     }
 
     override fun onInterrupt() {}
@@ -226,28 +274,92 @@ class CaptureService : AccessibilityService() {
 
     // ---------------- capture ----------------
 
+    /**
+     * Parks the screen. If a home screen or Kite is in front (a shortcut or gesture usually goes
+     * through home first), the last app is brought back first and parked once it's showing.
+     */
     fun capture() {
         if (busy) return
+        val active = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        Log.d(TAG, "capture: active=$active last=$lastPkg seen ${(System.currentTimeMillis() - lastSeenAt) / 1000}s ago")
+        if (active == null || isExcluded(active)) {
+            val target = lastPkg?.takeIf { System.currentTimeMillis() - lastSeenAt < RECENT_MS }
+            if (target == null) {
+                Log.d(TAG, "capture: nothing recent to park")
+                Toast.makeText(this, "Open the app you want to park first", Toast.LENGTH_SHORT).show()
+                return
+            }
+            busy = true
+            buzz()
+            Log.d(TAG, "capture: bringing $target back first")
+            waitPkg = target
+            onBack = { shoot() }
+            if (!AppRepository.resumeTask(this, target)) {
+                Log.d(TAG, "capture: couldn't bring $target back")
+                waitPkg = null; onBack = null; busy = false
+                Toast.makeText(this, "Couldn't reopen that app", Toast.LENGTH_SHORT).show()
+                return
+            }
+            handler.postAtTime({
+                if (waitPkg != null) {
+                    Log.d(TAG, "capture: no window event from $target, parking anyway")
+                    waitPkg = null
+                    onBack?.invoke(); onBack = null
+                }
+            }, WAIT_TOKEN, android.os.SystemClock.uptimeMillis() + WAIT_MS)
+            return
+        }
         busy = true
         buzz()
-        val read = readScreen()
-        if (Build.VERSION.SDK_INT >= 30) {
+        shoot()
+    }
+
+    /** Takes a screenshot with the Dim layer briefly hidden, so the picture isn't darkened. */
+    private fun screenshot(done: (Bitmap?) -> Unit) {
+        if (Build.VERSION.SDK_INT < 30) { done(null); return }
+        val dim = dimView
+        dim?.alpha = 0f
+        handler.postDelayed({
             takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                 override fun onSuccess(result: ScreenshotResult) {
+                    dim?.alpha = 1f
                     val bmp = runCatching {
                         val hw = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
                         val soft = hw?.copy(Bitmap.Config.ARGB_8888, false)
                         result.hardwareBuffer.close()
                         soft
                     }.getOrNull()
-                    save(read, bmp)
+                    done(bmp)
                 }
 
-                override fun onFailure(errorCode: Int) = save(read, null)
+                override fun onFailure(errorCode: Int) {
+                    dim?.alpha = 1f
+                    Log.d(TAG, "screenshot failed: $errorCode")
+                    done(null)
+                }
             })
-        } else {
-            save(read, null)
+        }, if (dim != null) 120L else 0L)
+    }
+
+    /** Adds a screenshot of what's on screen now to an existing card (used after Share › Park in Kite). */
+    private fun attachShot(cardId: String, toast: String) {
+        val active = runCatching { rootInActiveWindow?.packageName?.toString() }.getOrNull()
+        if (active == null || isExcluded(active)) {
+            Log.d(TAG, "attachShot: $active in front, skipping")
+            Toast.makeText(this, toast, Toast.LENGTH_SHORT).show()
+            return
         }
+        screenshot { bmp ->
+            Toast.makeText(this, toast, Toast.LENGTH_SHORT).show()
+            if (bmp == null) return@screenshot
+            Thread { runCatching { Kite.parking.attachImage(cardId, bmp) }; Log.d(TAG, "attachShot: added to $cardId") }.start()
+        }
+    }
+
+    private fun shoot() {
+        val read = readScreen()
+        Log.d(TAG, "shoot: pkg=${read.pkg} text=${read.text.length} chars url=${read.url}")
+        screenshot { save(read, it) }
     }
 
     private class Read(val pkg: String?, val title: String?, val text: String, val url: String?)
@@ -255,7 +367,7 @@ class CaptureService : AccessibilityService() {
     private fun readScreen(): Read {
         val root = runCatching { rootInActiveWindow }.getOrNull()
         val rootPkg = root?.packageName?.toString()
-        val pkg = rootPkg?.takeIf { it != packageName && it != "com.android.systemui" } ?: lastPkg
+        val pkg = rootPkg?.takeIf { !isExcluded(it) } ?: lastPkg
         if (root == null || rootPkg != pkg) return Read(pkg, null, "", null)
         val sb = StringBuilder()
         var url: String? = null
@@ -290,6 +402,7 @@ class CaptureService : AccessibilityService() {
             ?: label
         Thread {
             val ok = runCatching { Kite.parking.add(read.pkg, label, title, read.text, read.url, null, shot) }.isSuccess
+            Log.d(TAG, "saved card: app=$label pkg=${read.pkg} ok=$ok image=${shot != null}")
             handler.post {
                 busy = false
                 Toast.makeText(this, if (ok) "Parked ✓  $label" else "Couldn't park that", Toast.LENGTH_SHORT).show()

@@ -106,6 +106,15 @@ class ParkingLot(private val context: Context) {
         name
     }.getOrNull()
 
+    /** Sets the picture on an existing card, if it has none yet. */
+    @Synchronized
+    fun attachImage(id: String, screenshot: Bitmap) {
+        val card = _cards.value.firstOrNull { it.id == id } ?: return
+        if (card.image != null) return
+        val image = saveBitmap(id, screenshot) ?: return
+        persist(_cards.value.map { if (it.id == id) it.copy(image = image) else it })
+    }
+
     /** Drops expired, unpinned cards. Call on every home resume. */
     @Synchronized
     fun prune() {
@@ -130,7 +139,7 @@ class ParkingLot(private val context: Context) {
         persist(_cards.value.filterNot { it.id == id })
     }
 
-    /** Try, in order: the app's own deep link, the web link inside the app, any handler for the link, the app itself. */
+    /** Try, in order: the app's own deep link, the web link inside the app, any handler for the link, the app's existing task. */
     fun open(context: Context, card: Card): Boolean {
         card.intentUri?.let { raw ->
             val ok = runCatching {
@@ -149,7 +158,9 @@ class ParkingLot(private val context: Context) {
             if (card.pkg != null && tryStart(context, Intent(Intent.ACTION_VIEW, uri).setPackage(card.pkg))) return true
             if (tryStart(context, Intent(Intent.ACTION_VIEW, uri))) return true
         }
-        if (card.pkg != null && AppRepository.launchPackage(context, card.pkg)) return true
+        // No link: bring the app's task back as it was left. If the app is still in memory, that's
+        // usually the same screen.
+        if (card.pkg != null && AppRepository.resumeTask(context, card.pkg)) return true
         return false
     }
 

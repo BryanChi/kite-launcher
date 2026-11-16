@@ -41,10 +41,16 @@ class ShareActivity : ComponentActivity() {
                     runCatching { contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } }.getOrNull()
                 }
             }
-            withContext(Dispatchers.IO) {
+            val card = withContext(Dispatchers.IO) {
                 Kite.parking.add(source, appLabel, title, text, url, null, bmp)
             }
-            Toast.makeText(this@ShareActivity, "Parked in Kite", Toast.LENGTH_SHORT).show()
+            // No picture came with the share: once the share sheet is gone, screenshot the app
+            // underneath (needs the park shortcut on). The toast waits so it isn't in the picture.
+            if (bmp == null && CaptureService.running) {
+                CaptureService.attachScreenshot(card.id, delayMs = 500, toast = "Parked in Kite")
+            } else {
+                Toast.makeText(this@ShareActivity, "Parked in Kite", Toast.LENGTH_SHORT).show()
+            }
             finish()
         }
     }

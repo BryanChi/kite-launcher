@@ -31,6 +31,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.bryanchi.kite.capture.CaptureService
+import com.bryanchi.kite.capture.QsTiles
 import com.bryanchi.kite.data.Prefs
 import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
@@ -156,7 +157,7 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
         Section("How Kite works")
         Help("Letter wheel", "Press anywhere on home and slide. Slide along the letters, then across onto an app and let go. The app you use most is straight across from its letter. Let go on a letter to see all its apps. Slide back toward the edge of the screen to cancel.")
         Help("Pinned apps", "Your pinned apps sit in the thumb zone and never move. One \"now\" slot under them changes with the time of day.")
-        Help("Parking lot", "Press both volume keys together in any app, tap the Park tile, or use Share › Park in Kite. Tap a card to jump back to that exact page when the app supports it. Cards disappear after 24 hours unless you keep them.")
+        Help("Parking lot", "Press both volume keys together in any app, tap the Park tile, or use Share › Park in Kite. Volume keys save the screen and reopen the app. To get back to the exact post, use the app's Share button › Park in Kite. Cards disappear after 24 hours unless you keep them.")
         Help("Social timer", "Each open from Kite has a pause that grows (5 s, 10 s, 20 s, 30 s). When your budget runs out, or during blackout, the app is covered. The only way through is waiting on the block screen, and each wait doubles.")
         Spacer(Modifier.height(40.dp))
     }
@@ -193,6 +194,7 @@ private fun DimSection(vm: HomeViewModel) {
         Text("${(level * 100).roundToInt()}%", fontSize = 14.sp, color = Dim, modifier = Modifier.width(48.dp).padding(start = 8.dp))
     }
     if (!running) Text("Turn on the park shortcut above to use Dim.", color = Dim, fontSize = 13.sp)
+    AddTileRow("Dim") { QsTiles.addDim(context) }
 }
 
 @Composable
@@ -254,7 +256,24 @@ fun SetupRows(vm: HomeViewModel, group: SetupGroup) {
                     "• Share › Park in Kite, which works without any setup",
                 color = Dim, fontSize = 13.sp, lineHeight = 18.sp, modifier = Modifier.padding(start = 22.dp, bottom = 6.dp),
             )
+            AddTileRow("Park") { QsTiles.addPark(context) }
         }
+    }
+}
+
+/**
+ * "Add to Quick Settings" for one of Kite's tiles. Android 13+ shows its own prompt; older phones
+ * only have the tile editor.
+ */
+@Composable
+private fun AddTileRow(label: String, onAdd: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = 22.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            if (QsTiles.canPrompt) "\"$label\" tile. If it doesn't show up in the tile editor, restart the phone once."
+            else "Add the \"$label\" tile from the Quick Settings tile editor. If it isn't listed, restart the phone once.",
+            color = Dim, fontSize = 12.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f),
+        )
+        if (QsTiles.canPrompt) TextButton(onClick = onAdd) { Text("Add to Quick Settings", color = Accent) }
     }
 }
 

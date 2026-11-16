@@ -118,6 +118,16 @@ class AppRepository(private val context: Context) {
             return runCatching { context.startActivity(i) }.isSuccess
         }
 
+        /**
+         * Brings the app's existing task to the front as it was left, rather than restarting it.
+         * Starts the app fresh only if it has no task.
+         */
+        fun resumeTask(context: Context, pkg: String): Boolean {
+            val i = context.packageManager.getLaunchIntentForPackage(pkg) ?: return false
+            i.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            return runCatching { context.startActivity(i) }.isSuccess
+        }
+
         fun label(context: Context, pkg: String): String = runCatching {
             val pm = context.packageManager
             pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
