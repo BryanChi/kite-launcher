@@ -39,6 +39,22 @@ class Prefs(context: Context) {
         get() = sp.getBoolean("grayscale", false)
         set(v) = sp.edit().putBoolean("grayscale", v).apply()
 
+    /** Dim: a translucent black layer over the whole screen, for a dark room. */
+    var dimOn: Boolean
+        get() = sp.getBoolean("dimOn", false)
+        set(v) = sp.edit().putBoolean("dimOn", v).apply()
+
+    /** How dark the Dim layer is, as its alpha. */
+    var dimLevel: Float
+        get() = sp.getFloat("dimLevel", DIM_DEFAULT).coerceIn(DIM_MIN, DIM_MAX)
+        set(v) = sp.edit().putFloat("dimLevel", v.coerceIn(DIM_MIN, DIM_MAX)).apply()
+
+    companion object {
+        const val DIM_DEFAULT = 0.5f
+        const val DIM_MIN = 0.1f
+        const val DIM_MAX = 0.85f
+    }
+
     var autostartConfirmed: Boolean
         get() = sp.getBoolean("autostartConfirmed", false)
         set(v) = sp.edit().putBoolean("autostartConfirmed", v).apply()

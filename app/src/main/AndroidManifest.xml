@@ -49,6 +49,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Long-pressing a Kite Quick Settings tile opens Kite -->
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
@@ -84,6 +88,18 @@
             android:exported="true"
             android:icon="@drawable/ic_stat_kite"
             android:label="@string/capture_tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Dim: fake dark mode, a translucent black layer over everything -->
+        <service
+            android:name=".capture.DimTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_moon"
+            android:label="@string/dim_tile_label"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />

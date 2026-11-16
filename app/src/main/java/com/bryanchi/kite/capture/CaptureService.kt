@@ -4,7 +4,11 @@ import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.PixelFormat
+import android.graphics.Point
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
@@ -14,7 +18,10 @@ import android.os.Vibrator
 import android.provider.Settings
 import android.util.Patterns
 import android.view.Display
+import android.view.Gravity
 import android.view.KeyEvent
+import android.view.View
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
@@ -59,6 +66,78 @@ class CaptureService : AccessibilityService() {
             s.handler.postDelayed({ s.capture() }, delayMs)
             return true
         }
+
+        /** True while the Dim layer is on screen. */
+        val isDimmed get() = instance?.dimView != null
+
+        /**
+         * Turns the Dim layer on or off and remembers the choice. Call on the main thread. Returns
+         * false if the service isn't running, in which case nothing is shown.
+         */
+        fun setDim(on: Boolean): Boolean {
+            Kite.prefs.dimOn = on
+            val s = instance ?: return false
+            if (on) s.showDim() else s.hideDim()
+            return true
+        }
+
+        /** Sets how dark the Dim layer is and updates it live if it's showing. */
+        fun setDimLevel(level: Float) {
+            Kite.prefs.dimLevel = level
+            instance?.dimView?.setBackgroundColor(dimColor())
+        }
+
+        private fun dimColor() = Color.argb((Kite.prefs.dimLevel * 255).toInt(), 0, 0, 0)
+    }
+
+    private var dimView: View? = null
+
+    /**
+     * Dim lives in an accessibility overlay: it sits above the status bar, nav bar, keyboard and
+     * shade, and touches pass straight through it.
+     */
+    private fun showDim() {
+        if (dimView != null) return
+        val wm = getSystemService(WindowManager::class.java) ?: return
+        val (w, h) = realSize(wm)
+        // A square of the longest side, so it still covers everything after a rotation.
+        val side = maxOf(w, h)
+        val lp = WindowManager.LayoutParams(
+            side, side,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+            layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= 30) {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            } else {
+                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+        }
+        val v = View(this).apply { setBackgroundColor(dimColor()) }
+        runCatching { wm.addView(v, lp) }.onSuccess { dimView = v }
+    }
+
+    private fun hideDim() {
+        val v = dimView ?: return
+        dimView = null
+        runCatching { getSystemService(WindowManager::class.java)?.removeView(v) }
+    }
+
+    private fun realSize(wm: WindowManager): Pair<Int, Int> {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val b = wm.maximumWindowMetrics.bounds
+            return b.width() to b.height()
+        }
+        val p = Point()
+        @Suppress("DEPRECATION") wm.defaultDisplay.getRealSize(p)
+        return p.x to p.y
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -79,9 +158,17 @@ class CaptureService : AccessibilityService() {
         super.onServiceConnected()
         instance = this
         runCatching { accessibilityButtonController.registerAccessibilityButtonCallback(buttonCallback) }
+        if (Kite.prefs.dimOn) showDim()
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        hideDim()
+        if (instance === this) instance = null
+        return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        hideDim()
         runCatching { accessibilityButtonController.unregisterAccessibilityButtonCallback(buttonCallback) }
         if (instance === this) instance = null
         super.onDestroy()

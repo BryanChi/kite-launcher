@@ -21,10 +21,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.bryanchi.kite.capture.CaptureService
+import com.bryanchi.kite.data.Prefs
+import kotlin.math.roundToInt
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,6 +78,8 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
             "The wheel learns: apps you open most sit straight across from their letter, and letters you use most get more room.",
             color = Dim, fontSize = 13.sp, lineHeight = 17.sp,
         )
+
+        DimSection(vm)
 
         Section("Social timer")
         val used = timer.usedMs() / 60_000
@@ -150,6 +160,39 @@ fun SettingsScreen(vm: HomeViewModel, byPkg: Map<String, AppEntry>) {
         Help("Social timer", "Each open from Kite has a pause that grows (5 s, 10 s, 20 s, 30 s). When your budget runs out, or during blackout, the app is covered. The only way through is waiting on the block screen, and each wait doubles.")
         Spacer(Modifier.height(40.dp))
     }
+}
+
+/** Dim: a fake dark mode, a translucent black layer over everything. */
+@Composable
+private fun DimSection(vm: HomeViewModel) {
+    val context = LocalContext.current
+    @Suppress("UNUSED_VARIABLE") val t = vm.tick // re-read the switch after a toggle
+    Section("Dim")
+    val running = CaptureService.running
+    ToggleRow(
+        "Dim the screen",
+        "A see-through black layer over everything, for a dark room. Also in Quick Settings as the \"Dim\" tile. " +
+            "It uses the park shortcut service, so that needs to be on.",
+        CaptureService.isDimmed,
+    ) { on ->
+        if (!CaptureService.setDim(on)) {
+            Toast.makeText(context, "Dim needs Kite's park shortcut turned on", Toast.LENGTH_LONG).show()
+            Perms.openAccessibility(context)
+        }
+        vm.bump()
+    }
+    var level by remember { mutableFloatStateOf(Kite.prefs.dimLevel) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Strength", fontSize = 16.sp, modifier = Modifier.width(90.dp))
+        Slider(
+            value = level,
+            onValueChange = { level = it; CaptureService.setDimLevel(it) },
+            valueRange = Prefs.DIM_MIN..Prefs.DIM_MAX,
+            modifier = Modifier.weight(1f),
+        )
+        Text("${(level * 100).roundToInt()}%", fontSize = 14.sp, color = Dim, modifier = Modifier.width(48.dp).padding(start = 8.dp))
+    }
+    if (!running) Text("Turn on the park shortcut above to use Dim.", color = Dim, fontSize = 13.sp)
 }
 
 @Composable

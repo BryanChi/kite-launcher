@@ -5,6 +5,7 @@
     <string name="capture_service_summary">Press both volume keys together to park what\'s on screen</string>
     <string name="capture_service_description">Lets you save what\'s on screen to Kite\'s parking lot from any app: press volume up and volume down together, tap the Park tile in Quick Settings, or use the accessibility button. When you do, Kite takes a screenshot and reads the text and any link on screen to make the card. Nothing is read at any other time, and nothing leaves your phone.</string>
     <string name="capture_tile_label">Park</string>
+    <string name="dim_tile_label">Dim</string>
     <string name="capture_shortcut_label">Park this screen</string>
     <string name="capture_shortcut_short">Park</string>
 </resources>
